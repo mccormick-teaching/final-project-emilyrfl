@@ -1,0 +1,775 @@
+---
+title: "Project Report (components for poster)"
+author: "Anna Neufeld"
+date: "5/30/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+```
+
+I'm making this RMarkdown doc to consolidate some major results into sections for the poster. 
+
+## Introduction and Goals
+
+Did music get sadder post trump? (cite music blogs that might have suggested this).
+1) https://hellogiggles.com/news/politics/how-trump-influenced-popular-music/ This blog claims music got more protest-y post trump
+2) https://www.billboard.com/articles/events/year-in-music-2016/7616882/music-2016-politics-beyonce-neil-young-protest 
+3) https://www.billboard.com/articles/news/politics/7685091/obama-music-culture-shift A totally different take which actually suggests music could get happer in "hard times". 
+
+Trump's election was a major event in the musical world; numerous artists refused to sing at his inaguration; a definite shift towards a more political music culture. Is this shift evident in the lyrics of the most popular songs? 
+- Here is an article about the political shift of songs. https://www.theatlantic.com/entertainment/archive/2018/01/trump-protest-music-one-year-dorian-lynskey/550268/ 
+- A long interview about whether 2016 sparked a protest-song boom. 
+
+
+Our goal: study the lyrics of "pre-Trump" pop songs and "post-Trump" pop songs to see if we can detect a noticeable shift. 
+
+## Methods
+
+- We will get our song database from Billboard top 40 pop charts
+- We give ourselves a 2 month buffer on either side of Trump's election because change in pop charts is not instantaneous
+- We take 1 year worth of data on either side
+- So "pretrump" will be 09-01-2015 to 09-01-2016
+- Post trump will be 01/01/2017-01/01/2018
+- 52 top 40 charts for each time period, but there is overlap because songs stay on top 40 for many weeks
+- After removing 4 songs that were not in English, we get 194 pre trump songs and 173 post trump songs. 
+
+- We will use ONLY LYRICS to detect change over time. If there have been sentiment changes to music that have to do with slower songs, faster songs, more bass, etc, we will not detect these. Our "dataset" is the lyrics from these 367 songs; that is all we see.
+- It seems like for the most part the "protesty" vibe of a song that is discussed in that blog would be lyrical, so this doesn't seem unreasonable. 
+
+- Limiting ourselves to top 40 POP is a choice that could obviously effect the results. REquires that the ``change" we hope to detect is in pop music and is very mainstream. But seemed like the most reliable marker of overall mainstream music culture, which is what we want to study.
+
+
+## Non network-based attempts?
+
+Sentiment analysis is a popular field; there are lots of ways that we could try to compare the sentiment of pre-trump songs to post-trump songs. This is not an inherently networks-based project. 
+
+Examples of ways to tackle this without networks?
+
+The tidytext package in R has three built-in sentiment dictionaries. They tell us the sentiment of various words. These dictionaries tend to be things that were hand-labeled by humans on Amazon Turk or something. 
+
+The afinn corpus assigns a bunch of different words scores from -5 to 5 based on positivity or negativity. As a first pass, we can take these words and these scores, and for every song in our database we can assign words either their sentiment score from this database or 0 of they are not sentiment words (i.e. not in the database). Then we can just do a simple sum over the full lyrics to get a document score for each Song. This is super naive. We might worry that longer songs get more extreme scores, etc. So we should divide by length of sone I guess. 
+
+Under this technique here are the ``most positive" and ``most negative" songs
+
+```{r}
+library(tm)
+library(tidytext)
+load("words_we_want.RData")
+load("uniqueSongs.RData")
+load("full_lyrics.RData")
+words_we_want2 <- tm_map(words_we_want, stemDocument)
+tdm.full <- TermDocumentMatrix(words_we_want2)
+tdm.full.mat <- as.matrix(tdm.full)
+
+affin_score <- get_sentiments("afin")
+affin_score$word <- stemDocument(affin_score$word)
+affin_score <- affin_score[!duplicated(affin_score$word),]
+sent <- rep(0, NROW(rownames(tdm.full)))
+for (i in 1:NROW(rownames(tdm.full))) {
+  word <- rownames(tdm.full)[i]
+  if (word %in% affin_score$word) {
+    sent[i] <- affin_score$score[affin_score$word==word]
+  }
+}
+
+#### Normalize columns to sum to 1 so that longer songs dont get overall higher sentiment
+tdm.norm.mat <- apply(tdm.full.mat, 2, function(u) u/sum(u))
+doc_scores <- t(tdm.norm.mat)%*%sent
+
+#### Under this scheme: what are the top 5% most positive songs and
+### top 5% most negative songs?
+cuts <- quantile(doc_scores, c(0.025, 0.975))
+uniqueSongs[doc_scores < cuts[1],]
+uniqueSongs[doc_scores > cuts[2],]
+
+#### Sentiment scores seemed to do something non-trivial. Issue- at least from those top 10 lists, there doesn't seem to be any pre/post trump pattern
+
+cuts <- quantile(doc_scores, c(0.25, 0.75))
+uniqueSongs$sentiment <- "Neutral"
+uniqueSongs$sentiment[doc_scores > cuts[2]] <- "Pos"
+uniqueSongs$sentiment[doc_scores < cuts[1]] <- "Negative"
+```
+
+According to the table below, given the very naive setup, the proportion of negative songs post trump went up and the proportion of positive songs post trump went down. Cool! This is what we wanted to learn!! Here I defined positive as upper quartile of sentiment score and negative as lower quartile of sentiment score. Everything else is neutral. 
+
+```{r}
+prop.table(table(uniqueSongs$PostTrump, uniqueSongs$sentiment), margin=1)
+```
+
+Okay, so maybe the project is done? No... 
+This word-score-summing method is literally so subjective. Who is to say that the afinn corpus is the right one? And if we change corpuses it changes results which is VERY fishy. Also, who even knows if the differences in table above are statistically significant? There is definitely more work to do.
+
+demonstration of fishiness: Let's use the Bing corpus instead of the afinn corpus. This doesn't give scores- it just gives positive or negative. So there is no way that one word can be ``more positive" than another positive word. But still, doing the same word summing thing should give at least similar results. 
+
+```{r}
+bing_neg <- (get_sentiments("bing") %>% filter(sentiment == "negative"))$word
+stemmed_neg <- stemDocument(bing_neg)
+all_neg <- stemmed_neg[!duplicated(stemmed_neg)]
+
+bing_pos <- (get_sentiments("bing") %>% filter(sentiment == "positive"))$word
+stemmed_pos <- stemDocument(bing_pos)
+all_pos <- stemmed_pos[!duplicated(stemmed_pos)]
+
+POS_VOC <- which(rownames(tdm.full) %in% all_pos)
+NEG_VOC <- which(rownames(tdm.full) %in% all_neg)
+
+sent_vec <- rep(0, NROW(rownames(tdm.full)))
+sent_vec[POS_VOC] <- 1
+sent_vec[NEG_VOC] <- -1
+
+doc_scores2 <- t(tdm.norm.mat)%*%sent_vec
+
+#### Under this scheme: what are the top 5% most positive songs and
+### top 5% most negative songs?
+cuts <- quantile(doc_scores2, c(0.025, 0.975))
+uniqueSongs[doc_scores2 < cuts[1],]
+uniqueSongs[doc_scores2 > cuts[2],]
+#### Takeaway different answers
+
+#### Sentiment scores seemed to do something non-trivial. Issue- at least from those top 10 lists, there doesn't seem to be any pre/post trump pattern
+
+cuts <- quantile(doc_scores2, c(0.25, 0.75))
+uniqueSongs$sentiment2 <- "Neutral"
+uniqueSongs$sentiment2[doc_scores2 > cuts[2]] <- "Pos"
+uniqueSongs$sentiment2[doc_scores2 < cuts[1]] <- "Negative"
+
+prop.table(table(uniqueSongs$PostTrump, uniqueSongs$sentiment2), margin=1)
+```
+
+Actually, we still get the expected pre/post trump positive-negative flip. But we see that some songs have switched labels. And in general this is subjective. We don't necessarily think to the human eye that it did that well at getting most positive and most negative songs. 
+
+```{r}
+table(uniqueSongs$sentiment, uniqueSongs$sentiment2)
+```
+
+## Networks based approaches
+
+-We don't really trust the non-network based attempts. Very subjective to someone else's sentiment dictionary- other people's sentiment dictionary not necessarily trained on music. 
+-Also, the non-networks based approach limits us to "postive" or "negative" sentiment; but based on the blogs we read maybe we want "protesty" vs."non-protesty". And we can't really put a finger on what this means. And importantly, to do a classification task we would need a labeled dataset of protest songs and non-protest songs to train, which is subjective and we don't have.
+- The solution: use a networks based approach to discover song similarity
+- Basic idea: make a co-occurence matrix. Two songs are similar if they have a lot of words in common. Turn this similarity into a network-- two songs are connected by an edge if they share a certain number of words (can set a threshold). 
+- We will try to discover clusters of documents using the networks based approach. Do preTrump songs cluster and postTrump songs cluster? This would be evidence of lyrical change over time, without needing to use any subjective labels. 
+
+- Make an adjacency matrix. It is weighted. Entry for doc-i, doc-j is vec(i) dotproduct vec(j), where entries of these vectors store number of times a word appeared for every word in vocabulary.
+- i.e. if doc i contained word  "super" 5 times and doc j contained "super" 10 times, this contributes 50 to its edge weight
+- This is maybe a bad thing- but is there another way to do it? Both documents containing same word several times SHOULD get more weight then if they contain the same word 1-2 times. 
+- We explore with different weight truncations to see what should really define an edge. For example, maybe the total score needs to be over 100 to count as an edge???
+- Tried different edge cutoffs- never got VBLPCM to give any sort of reasonable clustering- i.e. it always puts all words in one cluster
+- This is useless. 
+
+### Results of Network Based Approach:
+- Results mostly very unsatistfying. VBLPCM would not make clusters. 
+- Tried a few different dimensions, a few different number of clusters, and VBLPCM was just giving one giant cluster and some empty clusters.
+- It seems that VBLPCM doesn't do edge weights. Just does 0/1. So we need a subjective decision about how many words the songs must have in common in order to count it as an edge. 
+
+```{r}
+load("words_we_want.Rdata")
+load("full_lyrics.Rdata")
+load("uniqueSongs.Rdata")
+library(tm)
+words_we_want2 <- tm_map(words_we_want, stemDocument)
+
+## Make matrices. SUBJECTIVE DECISION NUMBER 1 IS ON Max frequency.
+## Right now, it says "remove words that appear in more than 200/364" documents.
+## The idea is that these might be really common words that are too imprecise to teach us about similarity. 
+maxDocFreq <- 200
+tdm <- TermDocumentMatrix(words_we_want2, control=list(bounds = list(global = c(2, maxDocFreq))))
+tdm.idf <- weightTfIdf(tdm, normalize = TRUE)
+
+mat1 <- as.matrix(tdm)
+mat2 <- as.matrix(tdm.idf)
+
+#### SUBJECTIVE DECISION NUMBER 2: IF A SONG APPEAR MORE THAN X times, we probably dont care. We just care that if appeared a LOT of time. 
+maxTermFreq <- 10
+mat1[mat1>maxTermFreq] <- maxTermFreq  
+
+#### Adjacency matrices = Dot products of doc vectors
+#### Doc,Doc entry = number of words songs have in common
+adj.mat <- t(mat1)%*%mat1 
+adj.mat2 <- t(mat2)%*%mat2
+
+##### PROCESS THE ADJACENCY MATRICES
+#### SET EDGE CUTOFF
+quantile(adj.mat, seq(0,1,length.out=11))
+cutoff <- 100
+adj.mat[adj.mat< cutoff] <- 0
+adj.mat[adj.mat >= cutoff] <- 1
+
+quantile(adj.mat2, seq(0,1,length.out=11))
+cutoff2 <- 0.016
+adj.mat2[adj.mat2< cutoff2] <- 0
+adj.mat2[adj.mat2 >= cutoff2] <- 1
+
+### FIRST TRY OUT A NETWORK
+require(network)
+network1 <- network(x = adj.mat, matrix.type="adjacency", directed=FALSE)
+network.idf <- network(x = adj.mat2, matrix.type="adjacency", directed=FALSE)
+```
+
+Okay, now the setup is done. Let's explore a latent space on both the regular network and the idf network. Recall that in an idf network edges were weighted by how often the term appears in the document. More choices down below about dimension and number of attempted clusters. 
+
+FIRST: non-idf network. Honestly, we should probs think about running this longer because technically it says it has not converged. Im just lazy so I havent done this yet.  
+```{r}
+library(VBLPCM)
+dim=2
+clust = 2
+v.start<-vblpcmstart(network1,G=clust,d=dim,LSTEPS=1e3)
+v.fit<-vblpcmfit(v.start,STEPS=20)
+vblpcmgroups(v.fit)
+
+dim(v.fit$Y) ###### NOTE- IF THIS IS NOT 367 BY 367, it means VBLPCM REMOVED SOME data points. This is a huge bummer, and requires manual sleuthing to figure out which ones were removed. Seems to be like it is points that, given our CUTOFF above, are mostly disconnected. Here I found these indices, and then checked with all.equal() that I removed correct ones. 
+which(apply(adj.mat, 1, sum)<2)
+###Test this guess
+mod_adj_mat <- adj.mat[-c(93,102,105),-c(93,102,105)]
+diag(mod_adj_mat) <- rep(0, 364)
+is_same <- v.fit$Y
+all.equal(mod_adj_mat, is_same)
+###### YES. They are the same. Thank the lord. So we can figure pre/post-ness
+###### for latent positions.
+latent_pos <- data.frame(v.fit$V_z)
+names(latent_pos) <- c("x", "y")
+latent_pos$postTrump <- uniqueSongs$PostTrump[-c(93,102,105)]
+latent_pos$ID <- uniqueSongs$ID[-c(93,102,105)]
+plot(latent_pos$x, latent_pos$y, col=as.factor(latent_pos$postTrump), pch=19)
+### Plot is not useful. Clusters not useful.
+
+#### okay, so plot wise, how useless.
+#### But can we figure out average distances??
+distmat <- as.matrix(dist(latent_pos[,c(1,2)], method = "euclidean"))
+
+##### For each song, calc. its average distance to pretrump songs and posttrump songs
+sames <- rep(0, NROW(distmat))
+diffs <- rep(0, NROW(distmat))
+correct <- rep(0, NROW(distmat))
+for (i in 1:NROW(distmat)) {
+  trump <- latent_pos$postTrump[i]
+  same <- which(latent_pos$postTrump == trump & latent_pos$ID != latent_pos$ID[i])
+  diff <- which(latent_pos$postTrump != trump & latent_pos$ID != latent_pos$ID[i])
+  sames[i] <- sum(distmat[i, same])/NROW(same)
+  diffs[i] <- sum(distmat[i, diff])/NROW(diff)
+  correct[i] <- sames[i] < diffs[i]
+}
+mean(correct)
+#### Bummer, so on average it is FALSE that "preTrump songs tend to be closer to preTrump songs and postTrump songs tend to be closer to postTrump songs". But I think this is because a few of the globally farthest away songs are postTrump, and these pull up everyone's postTrump distance. NEW IDEA: TRY KNN IN LATENT SPACE. 
+                     
+#### Would KNN work in this space??
+#### k can be changed. 
+neighbClass <- rep(0, NROW(distmat))
+k <- 5
+for (i in 1:NROW(distmat)) {
+  trump <- latent_pos$postTrump[i]
+  knn <- names(sort(distmat[i,])[1:k])
+  neighbClass[i] <- mean(as.numeric(latent_pos[knn,]$postTrump))
+}
+class <- neighbClass
+class[class<0.5] <- 0
+class[class>0.5] <- 1
+table(class, latent_pos$postTrump)
+```
+
+OMG BLESSED KNN ACTUALLY DOES PRETTY WELL. Works with k=3 or k=5. Look at that confusion matrix!!!! So, postTrump songs tend to be neighbors with postTrump songs and preTrump Songs tend to be neighbors with preTrump songs. We DO have some similarities, they just don't make nice large regions of space. There are other, bigger drivers of similarity (genre, etc) driving the LARGE regions of space. But we do see that neighbors tend to be neighbors with eachother. 
+
+Try higher dimension??  Spoiler alert- as far as I can tell, making the space 10-dimensional makes no difference. Still doesnt make clusters. KNN still works. Overal total distance still does not. Cannot make a plot in 10dims. 
+```{r}
+library(VBLPCM)
+dim=8
+clust = 2
+v.start<-vblpcmstart(network1,G=clust,d=dim,LSTEPS=1e3)
+v.fit<-vblpcmfit(v.start,STEPS=20)
+vblpcmgroups(v.fit)
+
+dim(v.fit$Y) ###### NOTE- IF THIS IS NOT 367 BY 367, it means VBLPCM REMOVED SOME data points. This is a huge bummer, and requires manual sleuthing to figure out which ones were removed. Seems to be like it is points that, given our CUTOFF above, are mostly disconnected. Here I found these indices, and then checked with all.equal() that I removed correct ones. 
+which(apply(adj.mat, 1, sum)<2)
+###Test this guess
+mod_adj_mat <- adj.mat[-c(93,102,105),-c(93,102,105)]
+diag(mod_adj_mat) <- rep(0, 364)
+is_same <- v.fit$Y
+all.equal(mod_adj_mat, is_same)
+###### YES. They are the same. Thank the lord. So we can figure pre/post-ness
+###### for latent positions.
+latent_pos <- data.frame(v.fit$V_z)
+latent_pos$postTrump <- uniqueSongs$PostTrump[-c(93,102,105)]
+latent_pos$ID <- uniqueSongs$ID[-c(93,102,105)]
+### Plot is not useful. Clusters not useful.
+
+#### okay, so plot wise, how useless.
+#### But can we figure out average distances??
+distmat <- as.matrix(dist(latent_pos[,1:dim], method = "euclidean"))
+
+##### For each song, calc. its average distance to pretrump songs and posttrump songs
+sames <- rep(0, NROW(distmat))
+diffs <- rep(0, NROW(distmat))
+correct <- rep(0, NROW(distmat))
+for (i in 1:NROW(distmat)) {
+  trump <- latent_pos$postTrump[i]
+  same <- which(latent_pos$postTrump == trump & latent_pos$ID != latent_pos$ID[i])
+  diff <- which(latent_pos$postTrump != trump & latent_pos$ID != latent_pos$ID[i])
+  sames[i] <- sum(distmat[i, same])/NROW(same)
+  diffs[i] <- sum(distmat[i, diff])/NROW(diff)
+  correct[i] <- sames[i] < diffs[i]
+}
+mean(correct)
+#### Bummer, so on average it is FALSE that "preTrump songs tend to be closer to preTrump songs and postTrump songs tend to be closer to postTrump songs". But I think this is because a few of the globally farthest away songs are postTrump, and these pull up everyone's postTrump distance. NEW IDEA: TRY KNN IN LATENT SPACE. 
+                     
+#### Would KNN work in this space??
+#### k can be changed. 
+neighbClass <- rep(0, NROW(distmat))
+k <- 5
+for (i in 1:NROW(distmat)) {
+  trump <- latent_pos$postTrump[i]
+  knn <- names(sort(distmat[i,])[1:k])
+  neighbClass[i] <- mean(as.numeric(latent_pos[knn,]$postTrump))
+}
+class <- neighbClass
+class[class<0.5] <- 0
+class[class>0.5] <- 1
+table(class, latent_pos$postTrump)
+```
+
+
+Try on the IDF network?? Im not optimistic, but ill try. 
+```{r}
+dim=2
+clust = 2
+v.start<-vblpcmstart(network.idf,G=clust,d=dim,LSTEPS=1e3)
+v.fit<-vblpcmfit(v.start,STEPS=20)
+vblpcmgroups(v.fit)
+
+dim(v.fit$Y) ###### NOTE- NOW ITS FINE- it didnt remove any nodes yay
+###### YES. They are the same. Thank the lord. So we can figure pre/post-ness
+###### for latent positions.
+latent_pos <- data.frame(v.fit$V_z)
+names(latent_pos) <- c("x", "y")
+latent_pos$postTrump <- uniqueSongs$PostTrump
+latent_pos$ID <- uniqueSongs$ID
+plot(latent_pos$x, latent_pos$y, col=as.factor(latent_pos$postTrump), pch=19)
+### Plot is not useful. Clusters not useful.
+
+#### okay, so plot wise, how useless.
+#### But can we figure out average distances??
+distmat <- as.matrix(dist(latent_pos[,c(1,2)], method = "euclidean"))
+
+##### For each song, calc. its average distance to pretrump songs and posttrump songs
+sames <- rep(0, NROW(distmat))
+diffs <- rep(0, NROW(distmat))
+correct <- rep(0, NROW(distmat))
+for (i in 1:NROW(distmat)) {
+  trump <- latent_pos$postTrump[i]
+  same <- which(latent_pos$postTrump == trump & latent_pos$ID != latent_pos$ID[i])
+  diff <- which(latent_pos$postTrump != trump & latent_pos$ID != latent_pos$ID[i])
+  sames[i] <- sum(distmat[i, same])/NROW(same)
+  diffs[i] <- sum(distmat[i, diff])/NROW(diff)
+  correct[i] <- sames[i] < diffs[i]
+}
+mean(correct)
+#### Barely over 50%. Still not useful.  
+                     
+#### Would KNN work in this space??
+#### k can be changed. 
+neighbClass <- rep(0, NROW(distmat))
+k <- 5
+for (i in 1:NROW(distmat)) {
+  trump <- latent_pos$postTrump[i]
+  knn <- names(sort(distmat[i,])[1:k])
+  neighbClass[i] <- mean(as.numeric(latent_pos[knn,]$postTrump))
+}
+class <- neighbClass
+class[class<0.5] <- 0
+class[class>0.5] <- 1
+table(class, latent_pos$postTrump)
+```
+KNN still works. Not necessarily better or worse. IDK how to evaluate these, since basically none of them really work anyways. 
+
+### Overal Takeaway from this section
+Clusters were a failure, but we can do KNN in latent space to see if pre/post Trump songs tend to be near one another. It seems like yes. latent space was not totally useless. Maybe if we could somehow condition on covariates that get rid of the other macro trends in space (genre, etc) then we could learn something more meaningful from the space. 
+
+### Finally, some subjective justification that this wasn't totally useless.
+
+What are the 5 nearest neighbors of Ed Sheeran Photograph? This is using the regular network in 2D, not sure it will matter. 
+
+```{r}
+dim=2
+clust = 2
+v.start<-vblpcmstart(network1,G=clust,d=dim,LSTEPS=1e3)
+v.fit<-vblpcmfit(v.start,STEPS=20)
+
+latent_pos <- data.frame(v.fit$V_z)
+names(latent_pos) <- c("x", "y")
+latent_pos$postTrump <- uniqueSongs$PostTrump[-c(93,102,105)]
+latent_pos$ID <- uniqueSongs$ID[-c(93,102,105)]
+
+
+#### okay, so plot wise, how useless.
+#### But can we figure out average distances??
+distmat <- as.matrix(dist(latent_pos[,c(1,2)], method = "euclidean"))
+neighbs <- list()
+k <- 5
+for (i in 1:NROW(distmat)) {
+  knn <- names(sort(distmat[i,])[2:(k+1)])
+  neighbs[[i]] <- paste(uniqueSongs[(latent_pos[knn,]$ID),]$Title, uniqueSongs[(latent_pos[knn,]$ID),]$Artist)
+}
+
+#### Ed Sheeran Photograph Neighbors
+neighbs[[8]]
+
+### Fight Song
+neighbs[[9]]
+
+### Cheerleader
+neighbs[[3]]
+
+### Shut up and Dance
+neighbs[[13]]
+
+#### What do you mean
+neighbs[[41]]
+
+### Trap queen
+neighbs[[40]]
+
+### Good Life
+neighbs[[which(latent_pos$ID==271)]]
+
+
+```
+
+
+### TAKEAWAY 2: THESE SIMILARITIES ARE TOTAL TRASH.
+we got lucky with the KNN thing. ALSO, btw, KNN got to use itself as its own closest neighbor. Which seems absurd, but frequently "training set" KNN is ACTUALLY done this way. But it means that with K=5, if there are 2 trump neighbs and 2 non trump neighbs, the tie-breaker is its own class. No wonder we are doing well. Similarities make me think we learned nothing useful.
+
+AND WHY WOULD WE learn anything useful?? Without doing something clever, these methods cant tell which words are synonyms and stuff. No sense of meaning. Idk, no wonder it doesnt work. Let's try singular value decomp to try to remedy this. 
+
+## Latent Semantic Analysis Approaches
+- A common technique. Highly related to latent space models and networks, but a little bit of a different approach. 
+- LSA is a general technique for finding word similarity and doc similarity via dimension reduction. We use a singular value decomposition of a term-document matrix to discover a new set of CONCEPTS (basically just principle components). New concepts are similarity-based; LSA assumes that words that are close in meaning will occur in siimilar documents. Compare two songs by taking their cosine similarity in concept space.  
+- LSA learns DOC similarity by implicitly learning TERM similarity. A new set of concepts! 
+- A lot of subtleties came up when we were actually filling in the term document matrix. Music is wierd and repetitive, so sometimes one song will contain a word 100 times. This really messes up those singular values. We truncated.
+- You are supposed to weight term frequency by inverse document frequency, but this was giving us WIERD results for a few words that appeared in only 2 Doc (words in 1 doc were removed bc they cannot teach us about similarity) super high weight, causing the song "thunder" for example to shoot way off into the distance, ruining any chance of making reasonable clusters. 
+
+OKAY, let's just try a few LSA models and see if we can say anything useful. 
+
+```{r}
+words_we_want2 <- tm_map(words_we_want, stemDocument)
+tdm <- TermDocumentMatrix(words_we_want2, control=list(bounds = list(global = c(2, 300))))
+tdm.idf <- weightTfIdf(tdm, normalize = TRUE)
+
+
+#findFreqTerms(tdm,lowfreq = 200)
+#findFreqTerms(tdm.idf, lowfreq=3)
+#termcount <-apply(tdm,1,sum)
+#doccount <- apply(tdm,1,function(u) sum(u>0))
+#termcount <-apply(tdm,1,sum)
+#head(termcount[order(termcount,decreasing = T)],20)
+
+#### OBSERVATION: I don't care if a song has a word 100 times
+#### vs. 20 times. Let's truncate matrix entries to the 99\%
+#### Percentile. 
+dtm_mat <- as.matrix(tdm)
+quantile(dtm_mat, 0.99)
+dtm_mat[dtm_mat>4] <- 4
+quantile(idf_mat, 0.99)
+idf_mat <- as.matrix(tdm.idf)
+idf_mat[idf_mat>0.599] <- 0.599
+
+##### LSA
+require(lsa)
+txt_mat<- as.textmatrix(dtm_mat)
+txt_mat_idf<- as.textmatrix(idf_mat)
+
+miniLSAspace <- lsa(txt_mat, dims=2)
+mediumLSAspace <- lsa(txt_mat, dims=10)
+miniLSAspace.idf <- lsa(txt_mat_idf, dims=2)
+mediumLSAspace.idf <- lsa(txt_mat_idf, dims=10)
+
+tk10 <-t(mediumLSAspace$sk * t(mediumLSAspace$tk)) 
+dk10 <- t(mediumLSAspace$sk * t(mediumLSAspace$dk))
+tk2 <-t(miniLSAspace$sk * t(miniLSAspace$tk)) 
+dk2 <- t(miniLSAspace$sk * t(miniLSAspace$dk))
+
+tk10.idf <-t(mediumLSAspace.idf$sk * t(mediumLSAspace.idf$tk)) 
+dk10.idf <- t(mediumLSAspace.idf$sk * t(mediumLSAspace.idf$dk))
+tk2.idf <-t(miniLSAspace.idf$sk * t(miniLSAspace.idf$tk)) 
+dk2.idf <- t(miniLSAspace.idf$sk * t(miniLSAspace.idf$dk))
+
+
+### We notice most terms clustered in one chunk,
+### with very common words sent way far off to ## space. "dont", "love", "know", "like" all v ## far away.
+## Seems bad and seem like Inverse document weighting could help. 
+plot(tk2[,1], y= tk2[,2], col="red", cex=.50, main="Term Plot, No Doc Weights")
+text(tk2[,1], y= tk2[,2], labels=rownames(tk2) , cex=.70) 
+
+#### But with IDF it is lowkey also pretty bad. 
+#### It puts "confid" and "uhhuh" vert far away.
+### And like yes we could remove these. But idk ## gets v subjective on what you remove. 
+plot(tk2.idf[,1], y= tk2.idf[,2], col="red", cex=.50, main="Term Plot, IDF Weight")
+text(tk2.idf[,1], y= tk2.idf[,2], labels=rownames(tk2) , cex=.70) 
+
+
+#### How do these translate into doc space?
+prePost <- uniqueSongs[uniqueSongs$ID==rownames(dk2),]$PostTrump
+
+plot(dk2[,1], y= dk2[,2], col=as.factor(prePost), cex=.50, main="Document Similarity Plot", pch=19)
+text(dk2[,1], y= dk2[,2], labels=rownames(dk2) , cex=.70) 
+plot(dk2.idf[,1], y= dk2.idf[,2], col=as.factor(prePost), cex=.50, main="Document Similarity Plot", pch=19)
+text(dk2.idf[,1], y= dk2.idf[,2], labels=rownames(dk2) , cex=.70) 
+
+### The non-idf-weighted pts Bad and Bougie way far away. The idf-weight pts Confident by Demi Lovato v far away. 
+```
+
+
+### TAKEAWAY:
+it did NOT learn about "pretrump" and "posttrump" clusters. Did it learn anything interesting? Lets try to figure out. Let's do the same distance task and then KNN task. And also some subjective evaluation. Which songs were rated as similar and why!!
+
+```{r}
+library(LSAfun)
+simMat2d <- multicos(rownames(dk2), tvectors=dk2, breakdown=F) 
+simMat10d <- multicos(rownames(dk10), tvectors=dk10, breakdown=F) 
+simMat2d.idf <- multicos(rownames(dk2.idf), tvectors=dk2.idf, breakdown=F) 
+simMat10d.idf <- multicos(rownames(dk10.idf), tvectors=dk10.idf, breakdown=F) 
+
+##### NOTE: Due to outliers the 2d-idf model
+#### looks functionally useless. Everything is the same except for the outliers. The 10d idf does not have the same problem which i suppose is nice. 
+quantile(simMat2d)
+quantile(simMat10d)
+quantile(simMat2d.idf)
+quantile(simMat10d.idf)
+
+sames <- matrix(0, nrow=NROW(simMat2d), ncol=4)
+diffs <- matrix(0, nrow=NROW(simMat2d), ncol=4)
+for (i in 1:NROW(simMat2d)) {
+  trump <- uniqueSongs$PostTrump[i]
+  same <- which(uniqueSongs$PostTrump == trump & uniqueSongs$ID != i)
+  diff <- which(uniqueSongs$PostTrump != trump & uniqueSongs$ID != i)
+  sames[i,1] <- sum(simMat2d[i, same])/NROW(same)
+  sames[i,2] <- sum(simMat10d[i, same])/NROW(same)
+  sames[i,3] <- sum(simMat2d.idf[i, same])/NROW(same)
+  sames[i,4] <- sum(simMat10d.idf[i, same])/NROW(same)
+  
+  diffs[i,1] <- sum(simMat2d[i, diff])/NROW(diff)
+  diffs[i,2] <- sum(simMat10d[i, diff])/NROW(diff)
+  diffs[i,3] <- sum(simMat2d.idf[i, diff])/NROW(diff)
+  diffs[i,4] <- sum(simMat10d.idf[i, diff])/NROW(diff)
+}
+
+mean(sames[,1])
+mean(diffs[,1])
+
+mean(sames[,2])
+mean(diffs[,2])
+
+mean(sames[,3])
+mean(diffs[,3])
+
+mean(sames[,4])
+mean(diffs[,4])
+
+#### LOL TAKEAWAY: there are literally no difference.
+### DISTANCE IN THIS SPACE IS USELESS
+mean(sames[,1]>diffs[,1])
+mean(sames[,2]>diffs[,2])
+mean(sames[,3]>diffs[,3])
+mean(sames[,4]>diffs[,4])
+```
+
+Okay, time to try KNN. Can we see if this is remotely reasonable??
+```{r}
+#### Would KNN work in this space??
+#### k can be changed. 
+neighbClass <- matrix(0, nrow=NROW(simMat2d), ncol=4)
+k <- 5
+N <- NROW(simMat2d)
+for (i in 1:NROW(simMat2d)) {
+  knn2d <- names(sort(simMat2d[i,])[(N-k+1):N])
+  knn2d.idf <- names(sort(simMat2d.idf[i,])[(N-k+1):N])
+  knn10d <- names(sort(simMat10d[i,])[(N-k+1):N])  
+  knn10d.idf <- names(sort(simMat10d.idf[i,])[(N-k+1):N])
+  
+  neighbClass[i,1] <-mean(as.numeric(uniqueSongs[as.numeric(knn2d),]$PostTrump))
+  neighbClass[i,2] <-mean(as.numeric(uniqueSongs[as.numeric(knn2d.idf),]$PostTrump))
+  neighbClass[i,3] <-mean(as.numeric(uniqueSongs[as.numeric(knn10d),]$PostTrump))
+  neighbClass[i,4] <-mean(as.numeric(uniqueSongs[as.numeric(knn10d.idf),]$PostTrump))
+}
+class <- neighbClass
+class[class<0.5] <- 0
+class[class>0.5] <- 1
+table(class[,1], uniqueSongs$PostTrump)
+table(class[,2], uniqueSongs$PostTrump)
+table(class[,3], uniqueSongs$PostTrump)
+table(class[,4], uniqueSongs$PostTrump)
+
+#### I mean IDK they are fine. Worse when we do "non-cheaty" KNN. 
+### Meaning a point doesnt get to be its own neighb
+k=3
+for (i in 1:NROW(simMat2d)) {
+  knn2d <- names(sort(simMat2d[i,])[(N-k):(N-1)])
+  knn2d.idf <- names(sort(simMat2d.idf[i,])[(N-k):(N-1)])
+  knn10d <- names(sort(simMat10d[i,])[(N-k):(N-1)])  
+  knn10d.idf <- names(sort(simMat10d.idf[i,])[(N-k):(N-1)])
+  
+  neighbClass[i,1] <-mean(as.numeric(uniqueSongs[as.numeric(knn2d),]$PostTrump))
+  neighbClass[i,2] <-mean(as.numeric(uniqueSongs[as.numeric(knn2d.idf),]$PostTrump))
+  neighbClass[i,3] <-mean(as.numeric(uniqueSongs[as.numeric(knn10d),]$PostTrump))
+  neighbClass[i,4] <-mean(as.numeric(uniqueSongs[as.numeric(knn10d.idf),]$PostTrump))
+}
+class <- neighbClass
+class[class<0.5] <- 0
+class[class>0.5] <- 1
+table(class[,1], uniqueSongs$PostTrump)
+table(class[,2], uniqueSongs$PostTrump)
+table(class[,3], uniqueSongs$PostTrump)
+table(class[,4], uniqueSongs$PostTrump)
+
+#### Omg its so much worse with non-cheaty KNN. 
+#### Among pretrump songs we do a little better than among post trump songs.
+#### Also the 2 Dimensional IDF model is terrible. The other ones a little less bad. 
+```
+
+Okay, so basically this was a failure. Can we zoom in on our learned "concept space" at all to see if we did anything interesting in small regions?? For the non idf model or the idf model.
+
+```{r}
+## Zoomed in plots.
+### First zoom not great. These arent very meaningful words. 
+plot(tk2[,1], y= tk2[,2], col="red", cex=.50, main="Term Plot, No Doc Weights",
+     xlim=c(-10,-4), ylim=c(-1,4))
+text(tk2[,1], y= tk2[,2], labels=rownames(tk2) , cex=.70) 
+
+### This segment: LOL kinda inappropriate for a poster. But this is in fact similarities. 
+plot(tk2[,1], y= tk2[,2], col="red", cex=.50, main="Term Plot, No Doc Weights",
+     xlim=c(-3,-0.7), ylim=c(-3,-1))
+text(tk2[,1], y= tk2[,2], labels=rownames(tk2) , cex=.70) 
+
+
+#### Here's an IDF version that is zoomed in
+plot(tk2.idf[,1], y= tk2.idf[,2], col="red", cex=.50, main="Term Plot, IDF Weight", xlim=c(-0.25, -0.15), ylim=c(-0.05,0.05))
+text(tk2.idf[,1], y= tk2.idf[,2], labels=rownames(tk2) , cex=.70) 
+
+#### Same idea, we can zoom into our 2D document space to look for things. HEY- this actually did a non-trivial genre-type
+### thing I think. I would personally argue that this model is LESS useless than the previous network based ones. 
+plot(dk2[,1], y= dk2[,2], col=as.factor(prePost), cex=.50, main="Document Similarity Plot", pch=19, xlim=c(-17,-10), ylim=c(-13,-4))
+text(dk2[,1], y= dk2[,2], labels=uniqueSongs[as.numeric(rownames(dk2)),]$Title, cex=0.5) 
+plot(dk2[,1], y= dk2[,2], col=as.factor(prePost), cex=.50, main="Document Similarity Plot", pch=19, xlim=c(-8,-5), ylim=c(-1,2))
+text(dk2[,1], y= dk2[,2], labels=uniqueSongs[as.numeric(rownames(dk2)),]$Title, cex=0.5)
+
+plot(dk2[,1], y= dk2[,2], col=as.factor(prePost), cex=.50, main="Document Similarity Plot", pch=19, xlim=c(-6,-2.1), ylim=c(-1,2.1))
+text(dk2[,1], y= dk2[,2], labels=uniqueSongs[as.numeric(rownames(dk2)),]$Title, cex=0.5)
+```
+
+If we want we can print out subjective lists of labels or something. 
+
+## Conclusions
+- The network approach didn't work that well.
+- Repetition and non-english words used in songs kind of complicated the construction of the term-document matrix. A lot of subjective choices. 
+- Documents like articles, speeches, books, are a lot less likely to have so much repetition, and so many meaningless words like "oooh" "ahhh" "uh-huh" that do not teach us anything. 
+- Songs are hard and we want to do ~future work~ on song similarity, etc. 
+
+
+## Final approach: redo Network and LSA approach, but before we start truncate the entire corpus to only include "sentiment" words as defined by the afinn package. 
+
+```{r}
+library(tidytext)
+affin_score <- get_sentiments("afin")
+affin_score$word <- stemDocument(affin_score$word)
+affin_score <- affin_score[!duplicated(affin_score$word),]
+strong_score <- affin_score[abs(affin_score$score)>0,]$word
+
+
+tdm.full <- TermDocumentMatrix(words_we_want2, list(global = c(2, 360)))
+our_vocab <- rownames(tdm.full)
+new_vocab <- our_vocab[our_vocab %in% strong_score]
+tdm.sentiment <- tdm.full[new_vocab,]
+
+##### Now we only have 538 total terms!!!!!! 
+##### I am going to build a 2D VBLPCM and a 2D LSA.
+##### I am not going to worry about idf because I see no evidence that it has been helping much. 
+
+
+##### VBLPCM
+mat <- as.matrix(tdm.sentiment)
+mat[mat>4] <- 4
+adj.mat <- t(mat)%*%mat 
+quantile(adj.mat, seq(0,1,length.out=11))
+cutoff <- 16
+adj.mat[adj.mat< cutoff] <- 0
+adj.mat[adj.mat >= cutoff] <- 1
+
+
+network.sent <- network(x = adj.mat, matrix.type="adjacency", directed=FALSE)
+
+dim=2
+clust = 2
+v.start<-vblpcmstart(network.sent,G=clust,d=dim,LSTEPS=1e3)
+v.fit<-vblpcmfit(v.start,STEPS=20)
+vblpcmgroups(v.fit)
+
+dim(v.fit$Y)  
+to_remove <- which(apply(adj.mat, 1, sum)<2)
+###Test this guess
+mod_adj_mat <- adj.mat[-to_remove,-to_remove]
+diag(mod_adj_mat) <- rep(0,dim(v.fit$Y)[1])
+is_same <- v.fit$Y
+all.equal(mod_adj_mat, is_same)
+###### YES. They are the same. Thank the lord. So we can figure pre/post-ness
+###### for latent positions.
+latent_pos <- data.frame(v.fit$V_z)
+names(latent_pos) <- c("x", "y")
+latent_pos$postTrump <- uniqueSongs$PostTrump[-to_remove]
+latent_pos$ID <- uniqueSongs$ID[-to_remove]
+plot(latent_pos$x, latent_pos$y, col=as.factor(latent_pos$postTrump), pch=19, cex=0.7)
+text(latent_pos$x, latent_pos$y, labels=uniqueSongs$Title[latent_pos$ID], cex=0.5)
+
+### Zoom in?? Actually why dont I just randomly sample 100 songs to see if I can see more, and then decide where to zoom in
+set.seed(123)
+sample <- sample(1:358, size=80)
+plot(latent_pos$x[sample], latent_pos$y[sample], col=as.factor(latent_pos$postTrump[sample]), pch=19, cex=0.7, xlim=c(-1,1), ylim=c(-1,1))
+text(latent_pos$x[sample], latent_pos$y[sample], labels=uniqueSongs$Title[latent_pos[sample,]$ID], cex=0.5)
+### Idk its hard to see stuff but i dont think anything really happened.
+```
+
+Now let's try the latent space model on sentiment words.
+
+```{r}
+sent.mat <- as.matrix(tdm.sentiment)
+sent.mat[sent.mat>4] <- 4
+txt_mat<- as.textmatrix(sent.mat)
+
+rownames(affin_score) <- affin_score$word
+scores <- affin_score[rownames(sent.mat),]
+scores$sent <- scores$score>0
+  
+sentLSAspace <- lsa(txt_mat, dims=2)
+
+tk2 <-t(sentLSAspace$sk * t(sentLSAspace$tk)) 
+dk2 <- t(sentLSAspace$sk * t(sentLSAspace$dk))
+
+#### hey! it did something! a cluster of swears. Problem is that love, like, yeah are sent so far away because they are COMMON. I think we should normalize?? 
+plot(tk2[,1], y= tk2[,2], cex=.50, main="Term Plot, No Doc Weights", col=as.factor(scores$sent), pch=19)
+text(tk2[,1], y= tk2[,2], labels=rownames(sent.mat), cex=0.5)
+
+#### ZOOM IN?? IDK a few things make sense, but its not like its WAY better with only sentiment words or anything.
+plot(tk2[,1], y= tk2[,2], cex=.50, main="Term Plot, No Doc Weights", col=as.factor(scores$sent), pch=19, xlim=c(-15,0), ylim=c(-6,6))
+text(tk2[,1], y= tk2[,2], labels=rownames(sent.mat), cex=0.5)
+
+
+
+normTDM.sent <- weightTfIdf(tdm.sentiment)
+mat <- as.matrix(normTDM.sent)
+mat[mat>2] <- 2
+txt_mat2<- as.textmatrix(mat)
+sentLSAspace <- lsa(txt_mat2, dims=2)
+tk2 <-t(sentLSAspace$sk * t(sentLSAspace$tk)) 
+dk2 <- t(sentLSAspace$sk * t(sentLSAspace$dk))
+plot(tk2[,1], y= tk2[,2], cex=.50, main="Term Plot, No Doc Weights", col=as.factor(scores$sent), pch=19)
+text(tk2[,1], y= tk2[,2], labels=rownames(mat), cex=0.5)
+#### IDK it really didnt help. We can zoom in?
+
+plot(tk2[,1], y= tk2[,2], cex=.50, main="Term Plot, No Doc Weights", col=as.factor(scores$sent), pch=19, xlim=c(-0.9,0), ylim=c(-0.4,0.3))
+text(tk2[,1], y= tk2[,2], labels=rownames(mat), cex=0.5)
+```
+
+
+## TAKEAWAY: truncating to only sentiment words didnt necessarily help us. Oh well!!!
+Is this enough to fill a poster?? 
+
