@@ -1,7 +1,5 @@
 ---
 title: "Project Report (components for poster)"
-author: "Anna Neufeld"
-date: "5/30/2019"
 output: html_document
 ---
 
@@ -57,9 +55,9 @@ Under this technique here are the ``most positive" and ``most negative" songs
 ```{r}
 library(tm)
 library(tidytext)
-load("words_we_want.RData")
-load("uniqueSongs.RData")
-load("full_lyrics.RData")
+load("words_we_want2.RData")
+load("uniqueSongs2.RData")
+load("full_lyrics2.RData")
 words_we_want2 <- tm_map(words_we_want, stemDocument)
 tdm.full <- TermDocumentMatrix(words_we_want2)
 tdm.full.mat <- as.matrix(tdm.full)
@@ -166,9 +164,6 @@ table(uniqueSongs$sentiment, uniqueSongs$sentiment2)
 - It seems that VBLPCM doesn't do edge weights. Just does 0/1. So we need a subjective decision about how many words the songs must have in common in order to count it as an edge. 
 
 ```{r}
-load("words_we_want.Rdata")
-load("full_lyrics.Rdata")
-load("uniqueSongs.Rdata")
 library(tm)
 words_we_want2 <- tm_map(words_we_want, stemDocument)
 
@@ -204,7 +199,7 @@ adj.mat2[adj.mat2< cutoff2] <- 0
 adj.mat2[adj.mat2 >= cutoff2] <- 1
 
 ### FIRST TRY OUT A NETWORK
-require(network)
+library(network)
 network1 <- network(x = adj.mat, matrix.type="adjacency", directed=FALSE)
 network.idf <- network(x = adj.mat2, matrix.type="adjacency", directed=FALSE)
 ```
@@ -220,10 +215,10 @@ v.start<-vblpcmstart(network1,G=clust,d=dim,LSTEPS=1e3)
 v.fit<-vblpcmfit(v.start,STEPS=20)
 vblpcmgroups(v.fit)
 
-dim(v.fit$Y) ###### NOTE- IF THIS IS NOT 367 BY 367, it means VBLPCM REMOVED SOME data points. This is a huge bummer, and requires manual sleuthing to figure out which ones were removed. Seems to be like it is points that, given our CUTOFF above, are mostly disconnected. Here I found these indices, and then checked with all.equal() that I removed correct ones. 
+dim(v.fit$Y) ###### NOTE- IF THIS IS NOT 366 BY 366, it means VBLPCM REMOVED SOME data points. This is a huge bummer, and requires manual sleuthing to figure out which ones were removed. Seems to be like it is points that, given our CUTOFF above, are mostly disconnected. Here I found these indices, and then checked with all.equal() that I removed correct ones. 
 which(apply(adj.mat, 1, sum)<2)
 ###Test this guess
-mod_adj_mat <- adj.mat[-c(93,102,105),-c(93,102,105)]
+mod_adj_mat <- adj.mat[-c(102,105),-c(102,105)]
 diag(mod_adj_mat) <- rep(0, 364)
 is_same <- v.fit$Y
 all.equal(mod_adj_mat, is_same)
@@ -231,8 +226,8 @@ all.equal(mod_adj_mat, is_same)
 ###### for latent positions.
 latent_pos <- data.frame(v.fit$V_z)
 names(latent_pos) <- c("x", "y")
-latent_pos$postTrump <- uniqueSongs$PostTrump[-c(93,102,105)]
-latent_pos$ID <- uniqueSongs$ID[-c(93,102,105)]
+latent_pos$postTrump <- uniqueSongs$PostTrump[-c(102,105)]
+latent_pos$ID <- uniqueSongs$ID[-c(102,105)]
 plot(latent_pos$x, latent_pos$y, col=as.factor(latent_pos$postTrump), pch=19)
 ### Plot is not useful. Clusters not useful.
 
@@ -284,15 +279,15 @@ vblpcmgroups(v.fit)
 dim(v.fit$Y) ###### NOTE- IF THIS IS NOT 367 BY 367, it means VBLPCM REMOVED SOME data points. This is a huge bummer, and requires manual sleuthing to figure out which ones were removed. Seems to be like it is points that, given our CUTOFF above, are mostly disconnected. Here I found these indices, and then checked with all.equal() that I removed correct ones. 
 which(apply(adj.mat, 1, sum)<2)
 ###Test this guess
-mod_adj_mat <- adj.mat[-c(93,102,105),-c(93,102,105)]
+mod_adj_mat <- adj.mat[-c(102,105),-c(102,105)]
 diag(mod_adj_mat) <- rep(0, 364)
 is_same <- v.fit$Y
 all.equal(mod_adj_mat, is_same)
 ###### YES. They are the same. Thank the lord. So we can figure pre/post-ness
 ###### for latent positions.
 latent_pos <- data.frame(v.fit$V_z)
-latent_pos$postTrump <- uniqueSongs$PostTrump[-c(93,102,105)]
-latent_pos$ID <- uniqueSongs$ID[-c(93,102,105)]
+latent_pos$postTrump <- uniqueSongs$PostTrump[-c(102,105)]
+latent_pos$ID <- uniqueSongs$ID[-c(102,105)]
 ### Plot is not useful. Clusters not useful.
 
 #### okay, so plot wise, how useless.
@@ -398,8 +393,8 @@ v.fit<-vblpcmfit(v.start,STEPS=20)
 
 latent_pos <- data.frame(v.fit$V_z)
 names(latent_pos) <- c("x", "y")
-latent_pos$postTrump <- uniqueSongs$PostTrump[-c(93,102,105)]
-latent_pos$ID <- uniqueSongs$ID[-c(93,102,105)]
+latent_pos$postTrump <- uniqueSongs$PostTrump[-c(102,105)]
+latent_pos$ID <- uniqueSongs$ID[-c(102,105)]
 
 
 #### okay, so plot wise, how useless.
@@ -468,11 +463,12 @@ tdm.idf <- weightTfIdf(tdm, normalize = TRUE)
 #### vs. 20 times. Let's truncate matrix entries to the 99\%
 #### Percentile. 
 dtm_mat <- as.matrix(tdm)
+idf_mat <- as.matrix(tdm.idf)
+idf_mat[idf_mat>0.599] <- 0.599
 quantile(dtm_mat, 0.99)
 dtm_mat[dtm_mat>4] <- 4
 quantile(idf_mat, 0.99)
-idf_mat <- as.matrix(tdm.idf)
-idf_mat[idf_mat>0.599] <- 0.599
+
 
 ##### LSA
 require(lsa)
