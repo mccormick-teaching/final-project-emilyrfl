@@ -18,6 +18,10 @@ Did pop song lyrics change pre and post 2016 election? Stat 567 final project by
 - uniqueSongs2.Rdata
 - Report.rmd 
 
+**To See Old Work Files (might not be functional)**
+
+- /moreinfo/
+
 **To Look at the Poster**
 
 - flanaganpresentation.pptx
